@@ -1,0 +1,137 @@
+{
+  "status": "metask-jev-4b: fast fitted r35 (p_cal clamped 0.81); slow shrinkage n0=20 (6.156/9.190/0.842); fallback = fast",
+  "held_out_validated": false,
+  "models": {
+    "metask-jev-4b": {
+      "fast": {
+        "placeholder": false,
+        "status": "fitted r35 (public231); p_cal clamped 0.784->0.81 for decisiveness margin",
+        "temperature_by_kind": {
+          "choice": 1.681792830507429,
+          "score": 1.189207115002721,
+          "noul": "one_bin"
+        },
+        "noul_calibration": {
+          "p_cal": 0.81
+        },
+        "by_type": {
+          "noul": {
+            "count": 74,
+            "p_cal": 0.7837837837837838,
+            "fitted": true,
+            "status": "candidate"
+          },
+          "choice": {
+            "count": 139,
+            "temperature": 1.681792830507429,
+            "nll": 0.52062450708802,
+            "fitted": true,
+            "status": "candidate"
+          },
+          "score": {
+            "count": 18,
+            "temperature": 1.189207115002721,
+            "nll": 0.47155304969351275,
+            "fitted": true,
+            "status": "insufficient"
+          }
+        },
+        "validation_status": "candidate; held-out validation required",
+        "held_out_validated": false,
+        "source_placeholder": true
+      },
+      "slow": {
+        "placeholder": false,
+        "status": "fitted r35 with sample-size shrinkage n0=20 (Opus pkg review B): hard-tier ECE 0.087 vs 0.102 raw fit; replaces earlier cap-at-3 plan",
+        "temperature_by_kind": {
+          "choice": 6.156,
+          "score": 9.19,
+          "noul": "one_bin"
+        },
+        "noul_calibration": {
+          "p_cal": 0.842
+        },
+        "by_type": {
+          "noul": {
+            "count": 20,
+            "p_cal": 0.9,
+            "fitted": true,
+            "status": "candidate"
+          },
+          "choice": {
+            "count": 21,
+            "temperature": 5.656854249492381,
+            "nll": 0.966098328690201,
+            "fitted": true,
+            "status": "candidate"
+          },
+          "score": {
+            "count": 5,
+            "temperature": 32.0,
+            "nll": 1.434411057191846,
+            "fitted": true,
+            "status": "insufficient"
+          }
+        },
+        "validation_status": "candidate; held-out validation required",
+        "held_out_validated": false,
+        "source_placeholder": true
+      },
+      "fallback": {
+        "placeholder": false,
+        "status": "same as fast block",
+        "temperature_by_kind": {
+          "choice": 1.681792830507429,
+          "score": 1.189207115002721,
+          "noul": "one_bin"
+        },
+        "noul_calibration": {
+          "p_cal": 0.81
+        },
+        "by_type": {
+          "noul": {
+            "count": 0,
+            "fitted": false,
+            "status": "insufficient",
+            "inherited_from": "fast"
+          },
+          "choice": {
+            "count": 9,
+            "temperature": 1.0905077326652577,
+            "nll": 1.196450568810606,
+            "fitted": true,
+            "status": "insufficient",
+            "inherited_from": "fast"
+          },
+          "score": {
+            "count": 1,
+            "temperature": 1.681792830507429,
+            "nll": 1.3584104609167595,
+            "fitted": true,
+            "status": "insufficient",
+            "inherited_from": "fast"
+          }
+        },
+        "validation_status": "candidate; held-out validation required",
+        "held_out_validated": false,
+        "source_placeholder": true
+      },
+      "placeholder": false,
+      "fitted_for": {
+        "model_key": "metask-jev-4b",
+        "quant": "bf16",
+        "adapter": null,
+        "prompt_sha": "e18ed7a06eb52f1b351458f384710a2c240aaf2b4f64d916b776c6d18ca3f938",
+        "backend": "vllm",
+        "margin_kind": "logratio",
+        "max_new_tokens": 512,
+        "reasoning_words": 250,
+        "max_prompt_tokens": 16384,
+        "request_contract": "typesafe.criteria.v1",
+        "placeholder": false,
+        "achieved": 0.2510822510822511,
+        "n": 231
+      }
+    }
+  }
+}

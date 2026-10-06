@@ -1,0 +1,220 @@
+{
+  "model": {
+    "path": "",
+    "name": "metask-jev-rain-4B",
+    "quant": "bf16",
+    "adapter": null,
+    "backend": "vllm",
+    "device_map": {
+      "": 0
+    },
+    "vllm_options": {
+      "gpu_memory_utilization": 0.85,
+      "max_num_seqs": 1
+    },
+    "model_key": "metask-jev-4b",
+    "enable_prefix_caching": true,
+    "attn_implementation": "sdpa",
+    "vllm_expected_version": "0.31.0"
+  },
+  "server": {
+    "bind": "127.0.0.1",
+    "port": 8000,
+    "max_request_bytes": 16777216,
+    "max_questions": 64,
+    "socket_timeout_seconds": 120,
+    "warmup": true,
+    "warmup_slow_tokens": 2
+  },
+  "prompt": {
+    "system": "You are a careful, decisive judge. Read the context, apply every rule, definition, threshold, exception and date it contains, and answer the question. Reply with exactly one word and nothing else.",
+    "enable_thinking": false,
+    "answer_marker": "ANSWER:",
+    "cot_instructions": {
+      "noul": "First reason step by step in at most {reasoning_words} words, tracking any intermediate state explicitly. Then output a final line of the form `ANSWER: yes` or `ANSWER: no`.",
+      "choice": "First reason step by step in at most {reasoning_words} words, tracking any intermediate state explicitly. Then output a final line `ANSWER: <letter>`.",
+      "score": "First reason step by step in at most {reasoning_words} words, tracking any intermediate state explicitly. Then output a final line `ANSWER: <number>`."
+    }
+  },
+  "generation": {
+    "reasoning_words": 250,
+    "max_new_tokens": 512,
+    "seed": 0,
+    "do_sample": false,
+    "temperature": 1.0,
+    "top_p": 1.0,
+    "top_k": 0,
+    "repetition_penalty": 1.0,
+    "suppress_tokens": null,
+    "begin_suppress_tokens": null,
+    "bad_words_ids": null,
+    "forced_bos_token_id": null,
+    "forced_eos_token_id": null,
+    "forced_decoder_ids": null,
+    "no_repeat_ngram_size": 0,
+    "min_new_tokens": 0,
+    "min_length": 0,
+    "length_penalty": 1.0,
+    "renormalize_logits": false,
+    "wall_timeout_seconds": 60
+  },
+  "routing": {
+    "mode": "routed",
+    "quota": 0.25,
+    "fuse": 0.35,
+    "state_dir": null,
+    "run_id": null,
+    "resume": false,
+    "slow_max_prompt_tokens": 48000,
+    "margin_kind": "logratio",
+    "margin_threshold": 2.3108509669020307,
+    "unparsed_policy": "fast",
+    "margin_threshold_fitted_for": {
+      "model_key": "metask-jev-4b",
+      "quant": "bf16",
+      "adapter": null,
+      "prompt_sha": "e18ed7a06eb52f1b351458f384710a2c240aaf2b4f64d916b776c6d18ca3f938",
+      "backend": "vllm",
+      "margin_kind": "logratio",
+      "max_new_tokens": 512,
+      "reasoning_words": 250,
+      "max_prompt_tokens": 16384,
+      "request_contract": "typesafe.criteria.v1",
+      "placeholder": false,
+      "achieved": 0.2510822510822511,
+      "n": 231
+    },
+    "long_item_slow_policy": "fast_only",
+    "target_slow_share": 0.25,
+    "cost_fuse": {
+      "enabled": true,
+      "warmup": 100,
+      "arm": 0.85,
+      "release": 0.8
+    }
+  },
+  "calibration_file": "calibration.json",
+  "pricing": {
+    "model_key": "Qwen3.5-4B",
+    "models": {
+      "Qwen3.5-4B": {
+        "input_per_million": 0.03,
+        "output_per_million": 0.15
+      }
+    },
+    "margin": 0.0,
+    "submission_models": {
+      "metask-jev-4b": "Qwen3.5-4B"
+    }
+  },
+  "limits": {
+    "cost_per_1000_decisions_usd": 0.0646,
+    "median_latency_seconds": 1.23,
+    "max_prompt_tokens": 16384,
+    "truncation_head_frac": 0.6,
+    "physical_max_prompt_tokens": 32768,
+    "state_head_tokens": 512,
+    "state_tail_tokens": 512,
+    "state_chunk_tokens": 200,
+    "compression_reserve_tokens": 32,
+    "raw_median_latency_seconds": 0.54,
+    "precompression_trigger_chars_per_token": 8,
+    "estimated_chars_per_token": 4,
+    "oom_retry_prompt_tokens": 4096
+  },
+  "bench": {
+    "timeout_seconds": 120,
+    "output_prefix": "bench_run",
+    "expected_public_count": 231,
+    "long_tail": {
+      "count": 23,
+      "prompt_tokens": 79000,
+      "total_decisions": 1624,
+      "projection_budgets": [
+        8192,
+        16384
+      ]
+    },
+    "target_slow_share": 0.25,
+    "concurrency": [
+      1
+    ],
+    "latency_scale": 2.0,
+    "latency_offset_seconds": 0.15,
+    "original_types": false
+  },
+  "interface": {
+    "boolean_keys": "request"
+  },
+  "usage": {
+    "basis": "engine"
+  },
+  "profiles": {
+    "metask-jev-4b": {
+      "model": {
+        "quant": "bf16",
+        "name": "metask-jev-rain-4B"
+      },
+      "routing": {
+        "quota": 0.25,
+        "fuse": 0.35,
+        "target_slow_share": 0.25,
+        "margin_threshold": 2.3108509669020307,
+        "margin_threshold_fitted_for": {
+          "model_key": "metask-jev-4b",
+          "quant": "bf16",
+          "adapter": null,
+          "prompt_sha": "e18ed7a06eb52f1b351458f384710a2c240aaf2b4f64d916b776c6d18ca3f938",
+          "backend": "vllm",
+          "margin_kind": "logratio",
+          "max_new_tokens": 512,
+          "reasoning_words": 250,
+          "max_prompt_tokens": 16384,
+          "request_contract": "typesafe.criteria.v1",
+          "placeholder": false,
+          "achieved": 0.2510822510822511,
+          "n": 231
+        },
+        "tier": "normal",
+        "tiers": {
+          "normal": {
+            "max_prompt_tokens": 16384,
+            "fast_only": false
+          },
+          "hard": {
+            "reasoning_words": 250,
+            "max_new_tokens": 512,
+            "fast_only": false
+          },
+          "long": {
+            "max_prompt_tokens": 16384,
+            "fast_only": true
+          }
+        }
+      },
+      "limits": {
+        "max_prompt_tokens": 16384,
+        "physical_max_prompt_tokens": 32768
+      },
+      "bench": {
+        "target_slow_share": 0.25
+      },
+      "pricing": {
+        "model_key": "Qwen3.5-4B"
+      },
+      "generation": {
+        "reasoning_words": 250,
+        "max_new_tokens": 512
+      }
+    }
+  },
+  "generation_reference": {
+    "verified": false,
+    "status": "Checkpoint/cache_cot generation metadata unavailable in authorized input scope; explicit deterministic defaults require deployment audit."
+  },
+  "package": {
+    "version": "metask-jev-rain-4B",
+    "finalized": true,
+    "sample_only": false
+  }
+}
