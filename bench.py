@@ -1,4 +1,4 @@
-"""Sequential, model-free HTTP benchmark client for the submission v2 API."""
+"""Sequential, model-free HTTP benchmark client with external output files."""
 
 import argparse
 import json
@@ -8,6 +8,8 @@ import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
+if __package__: from .core import external_output
+else: from core import external_output
 
 
 ROOT = Path(__file__).resolve().parent
@@ -25,7 +27,7 @@ def canonical_type(value):
 
 
 def _read_rows(path):
-    with Path(path).expanduser().open(encoding="utf-8-sig") as source:
+    with external_output(path,create_parent=False).open(encoding="utf-8-sig") as source:
         for line_number, line in enumerate(source, 1):
             if not line.strip():
                 continue
@@ -168,7 +170,8 @@ def post_json(endpoint, payload, timeout):
     request = urllib.request.Request(endpoint_url(endpoint),
                                      data=json.dumps(payload).encode("utf-8"),
                                      headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(request, timeout=timeout) as response:
         return json.load(response)
 
 
@@ -618,17 +621,14 @@ def fit_calibration(fast_rows, routed_rows, model_key):
 
 
 def read_run_rows(prefix):
-    if __package__:from .core import local_output
-    else:from core import local_output
-    path=local_output(prefix)
+    path=external_output(prefix,create_parent=False)
     if path.suffix!='.jsonl':path=path.with_name(path.name+'.jsonl')
+    path=external_output(path,create_parent=False)
     return [json.loads(line) for line in path.read_text(encoding='utf-8-sig').splitlines() if line.strip()]
 
 
 def write_candidate(path,value):
-    if __package__:from .core import local_output
-    else:from core import local_output
-    target=local_output(path);target.parent.mkdir(parents=True,exist_ok=True)
+    target=external_output(path)
     with target.open('x',encoding='utf-8') as out:json.dump(value,out,ensure_ascii=False,indent=2,allow_nan=False)
     return target
 
@@ -654,27 +654,25 @@ def apply_margin_candidate(config, report, tier=None):
 def get_health(endpoint,timeout,path="/health"):
     parts=urllib.parse.urlsplit(endpoint)
     url=urllib.parse.urlunsplit((parts.scheme,parts.netloc,path,'',''))
-    with urllib.request.urlopen(url,timeout=timeout) as response:
+    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(url,timeout=timeout) as response:
         return json.load(response)
 
 
 def output_paths(prefix, calibration_only=False):
-    candidate = Path(prefix).expanduser()
-    if not candidate.is_absolute():
-        candidate = ROOT / candidate
-    candidate = candidate.resolve()
-    if not candidate.is_relative_to(ROOT) or candidate == ROOT:
-        raise ValueError("output prefix must stay inside submission_v2")
+    if not prefix:
+        raise ValueError('An explicit absolute output prefix is required')
+    candidate = external_output(prefix,create_parent=False)
     if calibration_only:
-        target=candidate.with_name(candidate.name+'.margin_calibration.json')
+        target=external_output(candidate.with_name(candidate.name+'.margin_calibration.json'),create_parent=False)
         if target.exists(): raise FileExistsError('Calibration output exists')
-        target.parent.mkdir(parents=True,exist_ok=True)
+        external_output(target)
         return target
-    rows_path = candidate.with_name(candidate.name + ".jsonl")
-    summary_path = candidate.with_name(candidate.name + ".summary.json")
+    rows_path = external_output(candidate.with_name(candidate.name + ".jsonl"),create_parent=False)
+    summary_path = external_output(candidate.with_name(candidate.name + ".summary.json"),create_parent=False)
     if rows_path.exists() or summary_path.exists():
         raise FileExistsError("output already exists; choose a new prefix")
-    rows_path.parent.mkdir(parents=True, exist_ok=True)
+    external_output(rows_path)
     return rows_path, summary_path
 
 
@@ -711,9 +709,11 @@ def main(argv=None):
         return 0
     if args.apply_margin:
         if not args.output:parser.error('Apply margin needs a new output config')
-        write_candidate(args.output,apply_margin_candidate(config,json.loads(args.apply_margin.read_text(encoding='utf-8')),args.tier))
+        candidate=external_output(args.apply_margin,create_parent=False)
+        write_candidate(args.output,apply_margin_candidate(config,json.loads(candidate.read_text(encoding='utf-8')),args.tier))
         return 0
     if not args.endpoint or not (args.public or args.data):parser.error('Benchmark needs endpoint and public or data')
+    if not args.output_prefix:parser.error('Benchmark needs an explicit absolute --output-prefix')
     if args.P is not None:config['bench']['projection_prompt_tokens']=args.P
     if args.original_types: config['bench']['original_types']=True
     if args.price_model:
@@ -733,7 +733,7 @@ def main(argv=None):
     if args.calibrate_margin and levels!=[1]: parser.error('Margin calibration is serial')
     if args.calibrate_margin and args.engine_stats:parser.error('Use a separate serial run for engine reconciliation')
     endpoint = endpoint_url(args.endpoint)
-    paths = output_paths(args.output_prefix or config["bench"]["output_prefix"],calibration_only=args.calibrate_margin)
+    paths = output_paths(args.output_prefix,calibration_only=args.calibrate_margin)
     health=get_health(endpoint,config['bench']['timeout_seconds'])
     if __package__: from .core import apply_profile
     else: from core import apply_profile
@@ -760,13 +760,12 @@ def main(argv=None):
             json.dump(report,output,ensure_ascii=False,indent=2,allow_nan=False)
         print(json.dumps(report,ensure_ascii=False,indent=2,allow_nan=False))
         return 0
-    stats_path=paths[0].with_name(paths[0].stem+'.engine_stats.json')
+    stats_path=external_output(paths[0].with_name(paths[0].stem+'.engine_stats.json'),create_parent=False)
     if args.engine_stats and stats_path.exists():raise FileExistsError('Engine snapshot exists')
     # Claim both paths before requests, using exclusive creation for preservation.
     with paths[0].open("x", encoding="utf-8") as writer, paths[1].open("x", encoding="utf-8") as summary_writer:
         summaries={}
         snapshots={"health":health,"by_concurrency":{}}
-        stats_path=paths[0].with_name(paths[0].stem+".engine_stats.json")
         if args.engine_stats and stats_path.exists(): raise FileExistsError("Engine snapshot exists")
         for n in dict.fromkeys(levels):
             if args.engine_stats: before=get_health(endpoint,config['bench']['timeout_seconds'],'/engine_stats')

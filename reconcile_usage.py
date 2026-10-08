@@ -1,10 +1,12 @@
-"""提交前用量对账：只读 bench 输出与引擎计数快照，不发推理请求，不读请求内容。
+"""Reconcile existing benchmark output and engine counters without inference.
 
-python -B exp/submission_v2/reconcile_usage.py --run runs/r34_on [--run-off runs/r34_off] [--tol 0.001]
-退出码：0 通过；1 等式不成立；2 前置条件不满足（数据不全、计数器缺失）。
+Run prefixes must be absolute paths outside the package. The report is created
+exclusively beside its input. Exit codes: 0 passed, 1 mismatch, 2 invalid input.
 """
 import argparse, json, sys, math
 from pathlib import Path
+if __package__: from .core import external_output
+else: from core import external_output
 
 ROOT = Path(__file__).resolve().parent
 COUNTERS = ('prompt_tokens', 'generation_tokens', 'prefix_cache_queries', 'prefix_cache_hits',
@@ -13,18 +15,16 @@ FIELDS = ('input', 'output', 'total', 'cached', 'submitted', 'calls', 'generated
 
 
 def resolve(prefix):
-    p = Path(prefix).expanduser()
-    p = (p if p.is_absolute() else ROOT / p).resolve()
-    if not p.is_relative_to(ROOT):
-        raise SystemExit('prefix must stay inside submission_v2')
-    return p
+    return external_output(prefix,create_parent=False)
 
 
 def load(prefix):
     p = resolve(prefix)
-    rows = [json.loads(x) for x in p.with_name(p.name + '.jsonl').read_text(encoding='utf-8').splitlines() if x.strip()]
-    stats = json.loads(p.with_name(p.name + '.engine_stats.json').read_text(encoding='utf-8'))
-    rows = [r for r in rows if r.get('concurrency', 1) == 1]     # 只对串行档对账
+    rows_path = resolve(p.with_name(p.name + '.jsonl'))
+    stats_path = resolve(p.with_name(p.name + '.engine_stats.json'))
+    rows = [json.loads(x) for x in rows_path.read_text(encoding='utf-8').splitlines() if x.strip()]
+    stats = json.loads(stats_path.read_text(encoding='utf-8'))
+    rows = [r for r in rows if r.get('concurrency', 1) == 1]     # Reconcile serial runs only.
     if not rows:
         sys.exit(2)
     return p, rows, stats
@@ -99,7 +99,7 @@ def reconcile_one(rows, stats, tol):
         fails.append('sum(engine_submitted) matches neither engine prompt-counter definition')
     if not close(S['cached'], D['prefix_cache_hits'], tol):
         fails.append('sum(cached_tokens) != delta prefix_cache_hits')
-    if prefill is not None and not close(S['input'], prefill, tol):            # 等式一
+    if prefill is not None and not close(S['input'], prefill, tol):            # Identity E1.
         fails.append('E1: sum(usage.input_tokens) != engine prefill')
     if not close(S['output'], D['generation_tokens'], tol):
         fails.append('sum(usage.output_tokens) != delta generation_tokens')
@@ -122,7 +122,7 @@ def reconcile_pair(on_rows, off_rows, off_stats, tol):
         fails.append('decode drift: only %.1f%% rows identical between runs' % (100 * coverage))
     diff = sum(off[i]['input'] - on[i]['input'] for i in matched)
     cached = sum(on[i]['cached'] for i in matched)
-    if not close(diff, cached, tol):                                             # 等式二
+    if not close(diff, cached, tol):                                             # Identity E2.
         fails.append('E2: sum(input_off) - sum(input_on) != sum(cached_on)')
     return dict(matched=len(matched), coverage=coverage, input_diff=diff, cached_on=cached), fails
 
@@ -145,7 +145,8 @@ def main(argv=None):
         report.update(off=off_report, pair=pair)
         fails += ['off: ' + f for f in off_fails] + pair_fails
     report.update(tolerance=a.tol, passed=not fails, submission_ready=bool(a.run_off) and not fails, failures=fails)
-    with path.with_name(path.name + '.reconcile.json').open('x', encoding='utf-8') as out:   # 独占创建，不覆盖
+    report_path=external_output(path.with_name(path.name + '.reconcile.json'))
+    with report_path.open('x', encoding='utf-8') as out:
         json.dump(report, out, ensure_ascii=False, indent=2, allow_nan=False)
     print(json.dumps({'passed': not fails, 'failures': fails}, ensure_ascii=False))
     return 0 if not fails else (2 if any('precondition' in f for f in fails) else 1)

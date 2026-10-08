@@ -1,11 +1,11 @@
 {
-  "status": "metask-jev-4b: fast fitted r35 (p_cal clamped 0.81); slow shrinkage n0=20 (6.156/9.190/0.842); fallback = fast",
+  "status": "metask-jev-4b: fast fitted (p_cal clamped 0.81); slow shrinkage n0=20 (6.156/9.190/0.842); fallback = fast",
   "held_out_validated": false,
   "models": {
     "metask-jev-4b": {
       "fast": {
         "placeholder": false,
-        "status": "fitted r35 (public231); p_cal clamped 0.784->0.81 for decisiveness margin",
+        "status": "fitted on 231 public items; p_cal clamped 0.784->0.81 for decisiveness margin",
         "temperature_by_kind": {
           "choice": 1.681792830507429,
           "score": 1.189207115002721,
@@ -42,7 +42,7 @@
       },
       "slow": {
         "placeholder": false,
-        "status": "fitted r35 with sample-size shrinkage n0=20 (Opus pkg review B): hard-tier ECE 0.087 vs 0.102 raw fit; replaces earlier cap-at-3 plan",
+        "status": "fitted with sample-size shrinkage n0=20; held-out validation required",
         "temperature_by_kind": {
           "choice": 6.156,
           "score": 9.19,

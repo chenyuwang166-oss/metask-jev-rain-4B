@@ -11,12 +11,27 @@ import math
 import logging
 import json
 import hashlib
+import importlib.metadata
 import os
 import re
 import threading
 import time
 from pathlib import Path
 from typing import Any, Iterable
+
+
+def runtime_info():
+    """Expose dependency versions and device name without creating a CUDA context."""
+    import torch
+    from vllm.platforms import current_platform
+    versions = {}
+    for name in ('vllm', 'torch', 'transformers', 'tokenizers', 'triton'):
+        try:
+            versions[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            versions[name] = None
+    return dict(versions, cuda=torch.version.cuda,
+                gpu=current_platform.get_device_name())
 
 
 class BackendError(RuntimeError):
@@ -339,6 +354,7 @@ class VLLMBackend(TokenizerMixin):
             "max_logprobs", "logprobs_mode", "seed", "enable_lora",
             "generation_config", "override_generation_config", "logits_processors",
             "skip_tokenizer_init", "speculative_config", "enable_prefix_caching", "disable_log_stats",
+            "attention_backend",
         }
         overlap = sorted(reserved.intersection(options))
         if overlap:
@@ -357,10 +373,12 @@ class VLLMBackend(TokenizerMixin):
             try:
                 from vllm.lora.request import LoRARequest
                 self.lora_request = LoRARequest(
-                    "submission_v2_adapter", 1, str(Path(model_cfg["adapter"]).expanduser()),
+                    "adapter", 1, str(Path(model_cfg["adapter"]).expanduser()),
                 )
             except (ImportError, TypeError, ValueError) as exc:
                 raise BackendError("installed vllm does not support the requested LoRA adapter API") from exc
+        if "JEV_ATTENTION_BACKEND" in os.environ:
+            options["attention_backend"] = os.environ["JEV_ATTENTION_BACKEND"]
         try:
             # These are correctness invariants, not configurable routing policy.
             self.engine = LLM(
@@ -378,6 +396,7 @@ class VLLMBackend(TokenizerMixin):
             if model_cfg['quant']=='awq' and active_model_cfg.quantization not in ('awq','awq_marlin'):
                 raise BackendError('AWQ profile requires active AWQ quantization')
             self.quantization_kernel=active_model_cfg.quantization
+            self.runtime = runtime_info()
             cache_cfg=getattr(getattr(self.engine.llm_engine,'vllm_config',None),'cache_config',None)
             self.prefix_caching=getattr(cache_cfg,'enable_prefix_caching',None)
             self.tokenizer = self.engine.get_tokenizer()
@@ -416,7 +435,6 @@ class VLLMBackend(TokenizerMixin):
         try:
             if meter is not None: meter['engine_submitted']+=len(values)
             # TokensPrompt is a TypedDict; its runtime representation is this dict.
-            # TODO(vllm 0.31): installed-signature test is skipped without vllm.
             with self.lock:
                 check_deadline(meter)
                 result = self.engine.generate(

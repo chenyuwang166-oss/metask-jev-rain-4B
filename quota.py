@@ -14,6 +14,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import tempfile
 import threading
 import time
@@ -46,7 +47,11 @@ _ROOT = Path(__file__).resolve().parent
 def _os_lock(path: Path) -> Iterator[None]:
     # Keep the lock file permanently: unlinking it would let another process
     # lock a different inode while an existing process still holds this lock.
-    with path.open("a+b") as handle:
+    try:
+        handle = path.open("x+b")
+    except FileExistsError:
+        handle = path.open("r+b")
+    with handle:
         if os.name == "nt":
             import msvcrt
 
@@ -178,8 +183,15 @@ class QuotaCounter:
         self.fuse = float(fuse)
         self._quota = Decimal(str(quota))
         self._fuse = Decimal(str(fuse))
-        self.state_path = Path(state_path).resolve()
+        target=Path(state_path)
+        if not target.is_absolute():
+            raise QuotaStateError('Quota state path must be absolute')
+        self.state_path = target.resolve()
+        if self.state_path.is_relative_to(_ROOT) or _ROOT.is_relative_to(self.state_path):
+            raise QuotaStateError('Quota state must be separate from the package')
         self.lock_path = self.state_path.with_name(self.state_path.name + ".lock")
+        if self.lock_path.resolve().parent != self.state_path.parent:
+            raise QuotaStateError('Quota lock must stay inside its state directory')
         key = os.path.normcase(str(self.state_path))
         with _REGISTRY_MUTEX:
             self._lock = _PATH_LOCKS.setdefault(key, _PathLock())
@@ -326,13 +338,24 @@ class RuntimeCounter:
         import uuid
         routing = config['routing']
         self.run_id = routing.get('run_id') or uuid.uuid4().hex
-        if Path(self.run_id).name != self.run_id or self.run_id in ('.', '..'):
-            raise ValueError('run_id must be a single directory name')
+        if not isinstance(self.run_id,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}',self.run_id):
+            raise ValueError('run_id must contain 1 to 64 safe filename characters')
         self.memory_only = False
         self._mutex = threading.RLock()
         self._state = {'total':0, 'slow':0}
         self.durable = None
-        directory = Path(routing.get('state_dir') or (Path(tempfile.gettempdir()) / 'submission_v2')) / self.run_id
+        state_dir=routing.get('state_dir')
+        if not state_dir or not Path(state_dir).is_absolute():
+            raise QuotaStateError('An absolute state_dir is required')
+        state=Path(state_dir).resolve()
+        if state.is_relative_to(_ROOT) or _ROOT.is_relative_to(state):
+            raise QuotaStateError('State directory must be separate from the package')
+        directory=(state/self.run_id).resolve()
+        if directory.parent != state:
+            raise QuotaStateError('Run directory must stay inside state_dir')
+        for name in ('run.json','quota.json','quota.json.lock'):
+            if (directory/name).resolve().parent != directory:
+                raise QuotaStateError('Run files must stay inside the run directory')
         fingerprint = {k:routing[k] for k in ('mode','quota','fuse')}
         fingerprint.update(model_key=config['model']['model_key'], run_id=self.run_id,
             tier=routing.get('tier'), tiers=routing.get('tiers'), cost_fuse=routing.get('cost_fuse'),
@@ -350,7 +373,8 @@ class RuntimeCounter:
                 if directory.exists():
                     raise ValueError('run_id already exists; select a new run_id or explicit resume')
                 directory.mkdir(parents=True, exist_ok=False)
-                (directory/'run.json').write_text(json.dumps(fingerprint), encoding='utf-8')
+                with (directory/'run.json').open('x',encoding='utf-8') as handle:
+                    json.dump(fingerprint,handle)
             self.durable = QuotaCounter(directory/'quota.json', quota=routing['quota'], fuse=routing['fuse'])
             self._state = self.durable.snapshot()
         except (OSError, QuotaStateError):

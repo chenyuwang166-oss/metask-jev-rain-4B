@@ -8,8 +8,12 @@ import string
 from pathlib import Path
 
 import threading
-if __package__: from .backends import new_meter, check_deadline
-else: from backends import new_meter, check_deadline
+if __package__:
+    from .backends import new_meter, check_deadline
+    from .quota import QuotaStateError
+else:
+    from backends import new_meter, check_deadline
+    from quota import QuotaStateError
 
 ROOT = Path(__file__).resolve().parent
 YES_FORMS = ["yes", "Yes", "YES", " yes", " Yes", " YES", "true", "True", " true", " True", "Y", " Y"]
@@ -17,10 +21,16 @@ NO_FORMS = ["no", "No", "NO", " no", " No", " NO", "false", "False", " false", "
 ALIASES = {"boolean": "noul", "enum": "choice", "noul": "noul", "choice": "choice", "score": "score"}
 
 
-def local_output(path):
-    result = (ROOT / path).resolve()
-    if not result.is_relative_to(ROOT) or result == ROOT:
-        raise ValueError("Output files must be inside submission_v2")
+def external_output(path, *, create_parent=True):
+    """Validate an explicit external path; read-only callers disable mkdir."""
+    result = Path(path)
+    if not result.is_absolute():
+        raise ValueError("External paths must be absolute")
+    result = result.resolve()
+    if result.is_relative_to(ROOT) or ROOT.is_relative_to(result):
+        raise ValueError("External paths must be separate from the package")
+    if create_parent:
+        result.parent.mkdir(parents=True, exist_ok=True)
     return result
 
 
@@ -150,6 +160,36 @@ def validate_config(c):
 
 class UnsupportedRequest(ValueError):
     """Structurally valid request outside the supported semantic domain (422)."""
+
+
+class ItemFailure(RuntimeError):
+    """An individual item could not be processed (HTTP 422)."""
+
+
+class ServiceFailure(RuntimeError):
+    """An unrecoverable service failure (HTTP 503)."""
+
+
+ITEM_FAILURE_LIMIT = 3
+
+
+def unrecoverable_engine_error(exc):
+    """Recognize wrapped vLLM engine failures without importing the runtime."""
+    pending, seen = [exc], set()
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        classes = type(current).__mro__
+        if isinstance(current, ServiceFailure) or any(cls.__name__ == 'EngineDeadError' for cls in classes):
+            return True
+        vllm_classes = {cls.__name__ for cls in classes
+                        if cls.__module__ == 'vllm' or cls.__module__.startswith('vllm.')}
+        if 'VLLMServerError' in vllm_classes and 'EngineGenerateError' not in vllm_classes:
+            return True
+        pending.extend((current.__cause__, current.__context__))
+    return False
 
 
 def choice_codes(count):
@@ -752,6 +792,8 @@ def fast_attempt_with_retry(backend,task,config,ids,labels,groups,meter):
         scores,out=fast_readout(backend,ids,labels,groups,meter)
         return scores,out,None
     except Exception as exc:
+        if unrecoverable_engine_error(exc):
+            raise
         cuda=getattr(getattr(backend,'torch',None),'cuda',None)
         oom_type=getattr(cuda,'OutOfMemoryError',MemoryError)
         if not isinstance(exc,(MemoryError,oom_type)) and 'out of memory' not in str(exc).lower():
@@ -774,13 +816,15 @@ def slow_attempt(backend,ids,groups,config,meter):
     try:
         return slow_readout(backend,ids,groups,config,meter)
     except Exception as exc:
+        if unrecoverable_engine_error(exc):
+            raise ServiceFailure('unrecoverable engine failure') from exc
         timed_out=isinstance(exc,TimeoutError)
     release_failed_session(backend)
     if timed_out: raise TimeoutError('Slow deadline exceeded')
     raise RuntimeError('Slow session failed')
 
 
-def bounded_slow_attempt(backend,ids,groups,config,meter,model_lock):
+def bounded_slow_attempt(backend,ids,groups,config,meter,model_lock, *, on_service_failure=None):
     """Bound response wait; an in-flight synchronous engine call drains under lock.
 
     No worker may start another engine call after cancellation. Timeout usage is
@@ -797,13 +841,18 @@ def bounded_slow_attempt(backend,ids,groups,config,meter,model_lock):
                 value=slow_attempt(backend,ids,groups,config,meter)
                 check_deadline(meter)
             result.put((True,value))
-        except Exception as exc: result.put((False,type(exc)))
+        except Exception as exc:
+            fatal = unrecoverable_engine_error(exc)
+            if fatal and on_service_failure is not None:
+                on_service_failure()
+            result.put((False,ServiceFailure if fatal else type(exc)))
     worker=threading.Thread(target=work,daemon=True);worker.start()
     try: ok,value=result.get(timeout=timeout)
     except queue.Empty:
         meter['cancel_event'].set();meter['engine_usage_unknown']=True
         raise TimeoutError('Slow wall timeout; in-flight call draining')
     if not ok:
+        if value is ServiceFailure: raise ServiceFailure('unrecoverable engine failure')
         if value is TimeoutError: raise TimeoutError('Slow wall timeout')
         raise RuntimeError('Slow session failed')
     return value
@@ -841,6 +890,9 @@ class Service:
         validate_config(config)
         threshold_warnings=validate_threshold(config,allow_placeholder_threshold)
         self.model_lock = threading.RLock()
+        self._failure_lock = threading.Lock()
+        self.item_failure_streak = 0
+        self.dead = False
         self.config, self.backend, self.counter = config, backend, counter
         counter.configure_cost(config)
         key = config['model']['model_key']
@@ -857,15 +909,49 @@ class Service:
             self.calibration['fallback']=self.calibration['fast']
             self.warnings.append('fallback calibration missing: using fast block')
 
+    def _mark_dead(self):
+        with self._failure_lock:
+            self.dead = True
+
+    def is_dead(self):
+        if self.dead:
+            return True
+        # Read the runtime's existing flag; this performs no engine RPC.
+        resource = self.backend
+        for name in ('engine', 'llm_engine', 'engine_core', 'resources'):
+            resource = getattr(resource, name, None)
+        if getattr(resource, 'engine_dead', False):
+            self._mark_dead()
+        return self.dead
+
+    def _raise_if_service_failure(self, exc):
+        if unrecoverable_engine_error(exc) or self.is_dead():
+            self._mark_dead()
+            raise ServiceFailure('unrecoverable engine failure') from exc
+
+    def _item_failed(self):
+        with self._failure_lock:
+            self.item_failure_streak += 1
+            if self.item_failure_streak >= ITEM_FAILURE_LIMIT:
+                self.dead = True
+            return self.item_failure_streak
+
+    def _item_succeeded(self):
+        with self._failure_lock:
+            self.item_failure_streak = 0
+
     def health(self):
+        dead = self.is_dead()
         warnings = list(self.warnings)
+        if dead:
+            warnings.append('service failure')
         reference=getattr(self.backend,'generation_reference',None)
         if reference and not reference['verified']:warnings.append('generation reference '+reference['status'])
         if hasattr(self.backend,'forward_counters') and not getattr(self.backend,'stats_available',False):warnings.append('HF forward hook unavailable; usage estimated')
         if getattr(self.backend,'forward_counters',{}).get('uncounted_forwards',0):warnings.append('HF uncounted forwards; usage estimated')
         if getattr(self.counter, 'memory_only', False):
             warnings.append('quota persistence unavailable: memory counts, fast only')
-        return {'status': 'warning' if warnings else 'ok', 'warnings': warnings,
+        return {'status': 'error' if dead else 'warning' if warnings else 'ok', 'warnings': warnings,
                 'model_key': self.config['model']['model_key'], 'mode':self.config['routing']['mode'],
                 'quota_tier':self.config['routing'].get('tier','normal'), 'budget_tiers':self.config['routing'].get('tiers',{}),
                 'threshold_identity':threshold_identity(self.config),
@@ -902,9 +988,22 @@ class Service:
 
     def _one(self, task):
         with self.counter.accounting():
-            answer,detail=self._one_impl(task)
-            detail['threshold_identity']=threshold_identity(self.config)
-            detail['cost_fuse']=self.counter.record_cost(detail['usage_bases'][detail['accounting']],detail['path']=='slow')
+            if self.is_dead():
+                raise ServiceFailure('service failure')
+            try:
+                answer,detail=self._one_impl(task)
+                if self.is_dead():
+                    raise ServiceFailure('service failure')
+                detail['threshold_identity']=threshold_identity(self.config)
+                detail['cost_fuse']=self.counter.record_cost(detail['usage_bases'][detail['accounting']],detail['path']=='slow')
+            except ItemFailure as exc:
+                if self._item_failed() >= ITEM_FAILURE_LIMIT:
+                    raise ServiceFailure('consecutive item failures') from exc
+                raise
+            except ServiceFailure:
+                self._mark_dead()
+                raise
+            self._item_succeeded()
             return answer,detail
 
     def _one_impl(self, task):
@@ -939,9 +1038,9 @@ class Service:
                     detail['fast_oom_retry']=True
                     hard=True
 
-            except Exception:
-                warning = 'fast_failed: uniform distribution'
-                detail.update(fallback='uniform', usage_estimated=True)
+            except Exception as exc:
+                self._raise_if_service_failure(exc)
+                raise ItemFailure('item could not be processed') from exc
             detail['prompt_tokens']+=fast_meter['prompt']
             detail['completion_tokens']+=fast_meter['output']
             detail['readout_output_tokens']+=fast_meter['probes']
@@ -966,7 +1065,7 @@ class Service:
                     meter = new_meter()
                     meters.append(meter)
                     try:
-                        scores, count, forced, whitespace, probes = bounded_slow_attempt(backend,slow_ids,groups,c,meter,self.model_lock)
+                        scores, count, forced, whitespace, probes = bounded_slow_attempt(backend,slow_ids,groups,c,meter,self.model_lock,on_service_failure=self._mark_dead)
                         detail['slow_raw_label_scores']=detail['slow_scores']=scores
                         block = 'slow' if scores is not None else 'fallback'
                         detail['route'] = ('slow_forced_answer' if forced else 'slow') if scores is not None else 'slow_unparsed_fast'
@@ -974,6 +1073,7 @@ class Service:
                             scores = fast_scores
                         detail.update(n_new_tokens=count, forced_answer=forced, whitespace_step=whitespace)
                     except Exception as exc:
+                        self._raise_if_service_failure(exc)
                         scores, block = fast_scores, 'fallback'
                         warning = 'slow_failed: fast answer kept'
                         detail.update(fallback='slow_to_fast', route='slow_timeout_fast' if isinstance(exc,TimeoutError) else 'slow_failed_fast')
@@ -992,13 +1092,15 @@ class Service:
                         detail['prompt_tokens_details']['cached_tokens'] += meter['cached']
                         detail['prompt_tokens_details']['engine_submitted_tokens'] += meter['engine_submitted']
                 detail['calibration_block']=block
-                probs = (probabilities(labels, scores, qtype, self.calibration.get(block, self.calibration['fast']))
-                         if scores is not None else {label:1/len(labels) for label in labels})
+                if scores is None:
+                    raise ItemFailure('item could not be processed')
+                probs = probabilities(labels, scores, qtype, self.calibration.get(block, self.calibration['fast']))
             detail['quota_after_completion'] = decision.snapshot
-        except Exception:
-            probs = {label: 1 / len(labels) for label in labels}
-            warning = (warning + '; ' if warning else '') + 'fast_failed: uniform distribution'
-            detail.update(path='fast', fallback='uniform', usage_estimated=True)
+        except (ItemFailure, QuotaStateError, ServiceFailure):
+            raise
+        except Exception as exc:
+            self._raise_if_service_failure(exc)
+            raise ItemFailure('item could not be processed') from exc
         if (getattr(backend,'forward_counters',{}).get('uncounted_forwards',0)>uncounted_before
                 or hasattr(backend,'forward_counters') and not getattr(backend,'stats_available',False)):
             detail['usage_estimated']=True
@@ -1042,6 +1144,8 @@ class Service:
         return answer, detail
 
     def answer(self, payload):
+        if self.is_dead():
+            raise ServiceFailure('service failure')
         tasks = normalize_request(payload, self.config['server']['max_questions'])
         answers, details, errors, noul, choice = {}, {}, {}, {}, {}
         for name, task in tasks:
@@ -1072,30 +1176,3 @@ class Service:
         if errors:
             result['partial_errors'] = errors
         return result
-
-
-def emergency_response(payload,config):
-    """Last HTTP safety net; no model calls, unknown partial usage is explicit."""
-    answers,details,errors,noul,choice={},{},{},{},{}
-    tasks=normalize_request(payload,config['server']['max_questions'])
-    for name,task in tasks:
-        labels,_,_=render(task);probs={label:1/len(labels) for label in labels}
-        kind=task['question']['type'];request_type=task['question']['request_type']
-        if kind=='noul':
-            noul[name]=probs['yes']
-            style=config.get('interface',{}).get('boolean_keys','request')
-            if style=='true_false' or (style=='request' and request_type=='boolean'):
-                probs={'false':probs['no'],'true':probs['yes']}
-        else: choice[name]=labels[0]
-        warning='service_failed: uniform distribution; partial usage unavailable'
-        answers[name]={'type':request_type,'probabilities':probs,'warning':warning}
-        if kind=='noul': answers[name]['noul']=float(noul[name])
-        elif kind=='choice': answers[name]['choice']=choice[name]
-        errors[name]=warning
-        details[name]=dict(path='fast',route='service_failed_uniform',prompt_tokens=0,
-            completion_tokens=0,total_tokens=0,n_new_tokens=0,usage_estimated=True)
-    result=dict(answers=answers,model=config['model']['name'],partial_errors=errors,
-                usage=dict(usage_estimated=True,questions=details))
-    for key,value in [('noul',noul),('choice',choice)]:
-        if value: result[key]=next(iter(value.values())) if len(tasks)==1 else value
-    return result

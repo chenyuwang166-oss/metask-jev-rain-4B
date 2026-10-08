@@ -1,8 +1,8 @@
 {
-  "source": "requirements.measured.lock; user-supplied measured environment",
+  "source": "requirements.measured.lock; historical measured environment",
   "os": "Ubuntu 22.04.5",
   "python": "3.10.12",
-  "python_required": "3.10",
+  "python_required": ">=3.10",
   "nvidia_driver": "580.105.08",
   "gpu": "RTX 4090",
   "gpu_memory_gb": 24,

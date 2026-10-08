@@ -7,16 +7,24 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 if __package__:
-    from .core import UnsupportedRequest, Service, ROOT, load_config, load_json, local_output, validate_config, apply_profile, validate_calibration, validate_threshold
+    from .core import UnsupportedRequest, ItemFailure, ServiceFailure, Service, ROOT, load_json, validate_config, apply_profile, validate_calibration, validate_threshold
 else:
-    from core import UnsupportedRequest, Service, ROOT, load_config, load_json, local_output, validate_config, apply_profile, validate_calibration, validate_threshold
+    from core import UnsupportedRequest, ItemFailure, ServiceFailure, Service, ROOT, load_json, validate_config, apply_profile, validate_calibration, validate_threshold
 
 
 def make_handler(service):
+    def service_dead():
+        check = getattr(service, 'is_dead', None)
+        return check() if callable(check) else getattr(service, 'dead', False)
+
     class Handler(BaseHTTPRequestHandler):
         protocol_version='HTTP/1.1'
 
         def handle_expect_100(self):
+            if self.command == 'POST' and service_dead():
+                self.close_connection=True
+                self.respond(503, {'error':'service failure'})
+                return False
             try:
                 n=int(self.headers.get('Content-Length','0'))
                 if n<=0 or n>service.config['server']['max_request_bytes'] or self.headers.get('Transfer-Encoding'):
@@ -47,7 +55,16 @@ def make_handler(service):
 
         def do_GET(self):
             if self.path.split('?', 1)[0].rstrip('/') == '/health':
-                self.respond(200, service.health())
+                if __package__:
+                    from .attention import attention_health
+                else:
+                    from attention import attention_health
+                health = dict(service.health())
+                info = dict(health.get('info') or {})
+                info.update(attention_health())
+                info['runtime'] = dict(getattr(getattr(service, 'backend', None), 'runtime', {}) or {})
+                health['info'] = info
+                self.respond(200, health)
             elif self.path.split('?',1)[0].rstrip('/') == '/engine_stats':
                 try: self.respond(200,service.engine_stats())
                 except Exception: self.respond(503,{'error':'Engine counters unavailable'})
@@ -55,6 +72,10 @@ def make_handler(service):
                 self.respond(404, {'error':'Unknown route'})
 
         def do_POST(self):
+            if service_dead():
+                self.close_connection=True
+                self.respond(503, {'error':'service failure'})
+                return
             if self.path.split("?", 1)[0].rstrip("/") != "/v1/systemone":
                 self.close_connection=True
                 self.respond(404, {"error": "Unknown route"})
@@ -88,16 +109,24 @@ def make_handler(service):
             try:
                 result = service.answer(payload)
                 json.dumps(result,allow_nan=False)
+            except ItemFailure:
+                self.respond(422, {"error": "item could not be processed"})
+                return
+            except ServiceFailure:
+                self.respond(503, {"error": "service failure"})
+                return
             except Exception:
-                if __package__: from .core import emergency_response
-                else: from core import emergency_response
-                result=emergency_response(payload,service.config)
+                self.respond(503, {"error": "service failure"})
+                return
             self.respond(200, result)
 
     return Handler
 
 
 class QuietHTTPServer(ThreadingHTTPServer):
+    # Request workers must not keep a stopped service alive while draining.
+    daemon_threads = True
+
     def handle_error(self, request, client_address):
         # The base implementation prints a peer endpoint on disconnected clients.
         print("HTTP connection failed", flush=True)
@@ -114,9 +143,9 @@ def main(argv=None):
     parser.add_argument("--port", type=int)
     parser.add_argument("--mode", choices=("routed", "uniform", "fast_only"))
     parser.add_argument("--calibration", type=Path)
-    parser.add_argument('--state-dir', type=Path)
+    parser.add_argument('--state-dir', type=Path, required=True)
+    parser.add_argument('--startup-attempt', type=int, choices=(1, 2, 3), help=argparse.SUPPRESS)
     parser.add_argument('--run-id')
-    parser.add_argument('--resume', action='store_true')
     parser.add_argument('--model-key')
     parser.add_argument('--quota-tier',choices=('normal','hard','long'))
     parser.add_argument('--cost-fuse',choices=('on','off'))
@@ -136,7 +165,7 @@ def main(argv=None):
         c['routing']['state_dir'] = str(args.state_dir)
     if args.run_id:
         c['routing']['run_id'] = args.run_id
-    c['routing']['resume'] = args.resume
+    c['routing']['resume'] = False
     if args.model_key:
         c['model']['model_key'] = args.model_key
     apply_profile(c)
@@ -152,6 +181,17 @@ def main(argv=None):
     validate_threshold(c,args.allow_placeholder_threshold)
     if not c["model"]["path"] or not c["server"]["bind"]:
         parser.error("Set --model and --bind, or their config fields")
+    if __package__:
+        from .launch import check_python, check_versions, configure_server_runtime
+    else:
+        from launch import check_python, check_versions, configure_server_runtime
+    check_python()
+    check_versions()
+    model, state, rid = configure_server_runtime(
+        c['model']['path'], args.state_dir, args.run_id, args.startup_attempt)
+    c['model']['path'] = str(model)
+    c['routing']['state_dir'] = str(state)
+    c['routing']['run_id'] = rid
     calibration = load_json(args.calibration or ROOT / c["calibration_file"])
     validate_calibration(calibration, c["model"]["model_key"])
     if __package__:
