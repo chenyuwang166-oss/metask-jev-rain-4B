@@ -1,20 +1,22 @@
 # metask-jev-rain-4B
 
-> **Our repositories and official results (as of 2026-10-14; scores organizer-measured on the JevBench open-weight leaderboard; contact: chenyuwang166@gmail.com)**
->
-> | Name | What it is | Status | Official entry & result | Link |
-> |---|---|---|---|---|
-> | metask-jev-rain | Main repository: results hub + our 2026-10-03 frozen-base package, kept for the record | Record (frozen base) | Hosts the official-results table for both trained models (see rows below) | https://github.com/chenyuwang166-oss/metask-jev-rain |
-> | metask-jev-rain-12B-trained | Current 12B service package: our int4 AWQ quantization of google/gemma-4-12B-it-qat-q4_0-unquantized + our LoRA adapter, loaded together, never merged | **Current** | metask-jev-rain-12B-trained · JevBench open-weight leaderboard (v1.6.18 draw) · Capability Score **77.9**, highest among ranked entries labeled 12B in the system name · organizer-measured · 2026-10-14 | https://github.com/chenyuwang166-oss/metask-jev-rain-12B-trained |
-> | metask-jev-rain-12B | Our 2026-10-08 frozen-base service package (evaluated release: tag v1.1): frozen community INT4 checkpoint of Gemma 4 12B, weights unchanged | Archived (kept for the record) | No official score of its own; the official 12B result belongs to metask-jev-rain-12B-trained | https://github.com/chenyuwang166-oss/metask-jev-rain-12B |
-> | metask-jev-rain-4B | Offline inference service for the official JevBench TypeSafe adapter; model identity and measurements in its DISCLOSURE.md | Current (4B line) | Board row "Metask rain 4B" · Capability Score 66.0 (v1.6.4 draw) · see DISCLOSURE.md in the repo for scope and measurement conditions | https://github.com/chenyuwang166-oss/metask-jev-rain-4B |
-> | metask-jev-rain-31B-trained (GitHub) | Current 31B service package: public mirror of the evaluated release (runtime files byte-identical) | **Current** | metask-jev-rain-31B-trained (service v3) · JevBench open-weight leaderboard v1.6.18 · Capability Score **79.6**, #3 among open-weight systems (2026-10-14) | https://github.com/chenyuwang166-oss/metask-jev-rain-31B-trained |
-> | MeTask-Rain/metask-jev-rain-31B-trained | HF weights for the 31B service (base google/gemma-4-31B-it QAT releases + our LoRA; 33B params as counted by HF) | **Current** | Same official result as above (service v3, 79.6, #3 open-weight, 2026-10-14) | https://huggingface.co/MeTask-Rain/metask-jev-rain-31B-trained |
-> | MeTask-Rain/metask-jev-rain-12B-trained | HF weights for the 12B service package (same two-part model as the GitHub package) | **Current** | Same official result as above (77.9, 2026-10-14) | https://huggingface.co/MeTask-Rain/metask-jev-rain-12B-trained |
+This repository contains MeTask's 4B structured decision service, which returns a judgment and probabilities for the available options. As checked on **2026-10-17**, its JevBench entry **Metask rain 4B** has an organizer-measured Capability Score of **66.0**, ranked **#30** in the qualifying capability ranking. This is a dated result for this service, not a new package release.
 
-Offline inference service for the official JevBench TypeSafe adapter. Use the code
-commit given in the submission email. Model identity, data use, accounting and
-measurement evidence are in [DISCLOSURE.md](DISCLOSURE.md).
+The [model card](https://huggingface.co/wayfind/metask-jev-4b-policy-mix) provides the Qwen3.5-4B-derived weights for private deployment. The separate `metask-jev-4b` service uses the same checkpoint but has different service settings and its own result (61.8, #45). See the [existing disclosure](DISCLOSURE.md) for the pinned checkpoint and relationship. Current 31B and 12B releases are listed below.
+
+## Current trained models
+
+Results checked on **2026-10-17** against [JevBench board v1.7.46](https://benchmarkheaven.com/jev-models) (page updated 2026-10-16). Scores are organizer-measured **Capability Scores**. Capability ranks are among **129 qualifying open-weight systems** under the official cost and latency limits; they are not composite-score ranks. The leaderboard's 'official #' label refers to its separate composite ranking.
+
+For these full-set results, the operator measures each system on 1,500 decisions: 1,200 sealed items that submitters cannot access and 300 public items.
+
+| Model | Capability Score | Capability rank | Weights | Service |
+|---|---:|---|---|---|
+| MeTask 31B (service v3) | 79.6 | 3 | [Model card](https://huggingface.co/MeTask-Rain/metask-jev-rain-31B-trained) | [31B service](https://github.com/chenyuwang166-oss/metask-jev-rain-31B-trained) |
+| MeTask 12B | 77.9 | 6; highest among entries labeled 12B in the system name | [Model card](https://huggingface.co/MeTask-Rain/metask-jev-rain-12B-trained) | [12B service](https://github.com/chenyuwang166-oss/metask-jev-rain-12B-trained) |
+
+
+Published by MeTask under the public GitHub account `chenyuwang166-oss`. Project and contact entry point: [MeTask-Rain](https://huggingface.co/MeTask-Rain).
 
 ## Requirements
 
@@ -157,3 +159,8 @@ with the run and enters vLLM's compilation cache key; reuse of compiled artifact
 across runs, or a faster second startup, is not guaranteed.
 
 Maintenance and validation procedures are in [MAINTAINER.md](MAINTAINER.md).
+
+## License and attribution
+
+See [LICENSE](LICENSE) and the attribution notices in [DISCLOSURE.md](DISCLOSURE.md).
+
