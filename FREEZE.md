@@ -2,11 +2,11 @@
 
 Status: PARAMETERS FITTED
 
-Freeze time (UTC): 2026-10-08T07:58:32Z
+Freeze time (UTC): 2026-11-16T15:58:59Z
 
 Runtime image digest: vllm/vllm-openai@sha256:a4a4c0437bf7240089da5f08aa370c4aee17ae5290f7a3b468825ee26c4c3a6b
 
-This record records parameter hashes; MANIFEST.sha256 identifies package bytes. Neither certifies a model run. Measurements are described in DISCLOSURE.md.
+This record records parameter hashes; MANIFEST.sha256 identifies package bytes. Neither certifies a model run.
 
 config.json SHA256: 348df67c0f625afca1a720db2e4ed3d25b2a477948816c502445bf391943c864
 

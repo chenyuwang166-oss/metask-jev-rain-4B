@@ -1,22 +1,6 @@
 # metask-jev-rain-4B
 
-This repository contains MeTask's 4B structured decision service, which returns a judgment and probabilities for the available options. As checked on **2026-10-17**, its JevBench entry **Metask rain 4B** has an organizer-measured Capability Score of **66.0**, ranked **#30** in the qualifying capability ranking. This is a dated result for this service, not a new package release.
-
-The [model card](https://huggingface.co/wayfind/metask-jev-4b-policy-mix) provides the Qwen3.5-4B-derived weights for private deployment. The separate `metask-jev-4b` service uses the same checkpoint but has different service settings and its own result (61.8, #45). See the [existing disclosure](DISCLOSURE.md) for the pinned checkpoint and relationship. Current 31B and 12B releases are listed below.
-
-## Current trained models
-
-Results checked on **2026-10-17** against [JevBench board v1.7.46](https://benchmarkheaven.com/jev-models) (page updated 2026-10-16). Scores are organizer-measured **Capability Scores**. Capability ranks are among **129 qualifying open-weight systems** under the official cost and latency limits; they are not composite-score ranks. The leaderboard's 'official #' label refers to its separate composite ranking.
-
-For these full-set results, the operator measures each system on 1,500 decisions: 1,200 sealed items that submitters cannot access and 300 public items.
-
-| Model | Capability Score | Capability rank | Weights | Service |
-|---|---:|---|---|---|
-| MeTask 31B (service v3) | 79.6 | 3 | [Model card](https://huggingface.co/MeTask-Rain/metask-jev-rain-31B-trained) | [31B service](https://github.com/chenyuwang166-oss/metask-jev-rain-31B-trained) |
-| MeTask 12B | 77.9 | 6; highest among entries labeled 12B in the system name | [Model card](https://huggingface.co/MeTask-Rain/metask-jev-rain-12B-trained) | [12B service](https://github.com/chenyuwang166-oss/metask-jev-rain-12B-trained) |
-
-
-Published by MeTask under the public GitHub account `chenyuwang166-oss`. Project and contact entry point: [MeTask-Rain](https://huggingface.co/MeTask-Rain).
+This repository contains MeTask's 4B structured decision service, which returns a judgment and probabilities for the available options.
 
 ## Requirements
 
@@ -27,17 +11,6 @@ newer. The commands use the host's GPU 0. The runtime image is:
 ```text
 vllm/vllm-openai@sha256:a4a4c0437bf7240089da5f08aa370c4aee17ae5290f7a3b468825ee26c4c3a6b
 ```
-
-This is the linux/amd64 image of the official vLLM release tag `v0.31.0`.
-The image has index digest
-`sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e90a27b648b42a8e67c3`,
-linux/amd64 manifest digest
-`sha256:a4a4c0437bf7240089da5f08aa370c4aee17ae5290f7a3b468825ee26c4c3a6b`
-(used in the commands), and config digest
-`sha256:c76d0e2225a4b1cb1e2109ace39639f55e714abd1a7a427acc8b0bbd7f6a83b3`
-(the classic Docker image store shows the config digest as the image ID;
-the containerd image store identifies images by manifest or index digest,
-depending on the reference used when pulling).
 
 The image, code, model folder, task files and harness must already be on the evaluation
 host, with the exact repository digest used in step 1 resolvable locally.
@@ -154,13 +127,8 @@ absolute; state and model directories may neither contain one another nor overla
 the package. The fixed `/work/state` and `run1` paths meet the 70 UTF-8-byte startup
 temporary-path limit (a run ID under `/work/state` can be at most 46 ASCII bytes).
 Do not inject cache/configuration path overrides into the container: inherited
-overrides outside `/work/state` are rejected. The isolated model-view path changes
-with the run and enters vLLM's compilation cache key; reuse of compiled artifacts
-across runs, or a faster second startup, is not guaranteed.
-
-Maintenance and validation procedures are in [MAINTAINER.md](MAINTAINER.md).
+overrides outside `/work/state` are rejected. Maintenance and validation procedures are in [MAINTAINER.md](MAINTAINER.md).
 
 ## License and attribution
 
 See [LICENSE](LICENSE) and the attribution notices in [DISCLOSURE.md](DISCLOSURE.md).
-
